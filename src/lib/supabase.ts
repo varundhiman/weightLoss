@@ -17,7 +17,7 @@ export type Database = {
           id: string
           email: string
           display_name: string
-          initial_weight: number
+          height?: number
           created_at: string
           updated_at: string
         }
@@ -25,10 +25,11 @@ export type Database = {
           id: string
           email: string
           display_name: string
-          initial_weight: number
+          height?: number
         }
         Update: {
           display_name?: string
+          height?: number
         }
       }
       weight_entries: {
@@ -59,6 +60,8 @@ export type Database = {
           description: string | null
           created_by: string
           invite_code: string
+          start_date: string | null
+          end_date: string | null
           created_at: string
         }
         Insert: {
@@ -66,10 +69,14 @@ export type Database = {
           description?: string | null
           created_by: string
           invite_code: string
+          start_date?: string | null
+          end_date?: string | null
         }
         Update: {
           name?: string
           description?: string | null
+          start_date?: string | null
+          end_date?: string | null
         }
       }
       group_members: {

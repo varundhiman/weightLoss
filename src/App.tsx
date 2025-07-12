@@ -1,10 +1,12 @@
 import React, { useState } from 'react'
 import { useAuth } from './hooks/useAuth'
+import { useMobile } from './hooks/useMobile'
 import { AuthForm } from './components/Auth/AuthForm'
 import { Dashboard } from './components/Dashboard/Dashboard'
 
 function App() {
   const { user, loading } = useAuth()
+  const { isNative, keyboardHeight } = useMobile()
   const [isSignUp, setIsSignUp] = useState(false)
 
   if (loading) {
@@ -20,14 +22,20 @@ function App() {
 
   if (!user) {
     return (
-      <AuthForm
-        isSignUp={isSignUp}
-        onToggleMode={() => setIsSignUp(!isSignUp)}
-      />
+      <div style={{ paddingBottom: isNative ? keyboardHeight : 0 }}>
+        <AuthForm
+          isSignUp={isSignUp}
+          onToggleMode={() => setIsSignUp(!isSignUp)}
+        />
+      </div>
     )
   }
 
-  return <Dashboard />
+  return (
+    <div style={{ paddingBottom: isNative ? keyboardHeight : 0 }}>
+      <Dashboard />
+    </div>
+  )
 }
 
 export default App

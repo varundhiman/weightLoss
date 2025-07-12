@@ -27,6 +27,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
   const [membersProgress, setMembersProgress] = useState<MemberProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState<string | null>(null)
+  const [groupStartDate, setGroupStartDate] = useState<string | null>(null)
   const { user } = useAuth()
 
   useEffect(() => {
@@ -37,10 +38,25 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
   const fetchGroupProgress = async () => {
     try {
-      // First, get all group members
+      // First, get the group's start date
+      const { data: groupData, error: groupError } = await supabase
+        .from('groups')
+        .select('start_date')
+        .eq('id', groupId)
+        .single()
+
+      if (groupError) throw groupError
+      setGroupStartDate(groupData?.start_date || null)
+
+      // Get all group members with their profile information
       const { data: members, error: membersError } = await supabase
         .from('group_members')
-        .select('user_id, display_name')
+        .select(`
+          user_id,
+          profiles!inner (
+            display_name
+          )
+        `)
         .eq('group_id', groupId)
 
       if (membersError) throw membersError
@@ -52,11 +68,20 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
       // Get weight entries for all members
       const memberIds = members.map(m => m.user_id)
-      const { data: entries, error: entriesError } = await supabase
+      
+      // Build the query - filter by start date if it exists
+      let query = supabase
         .from('weight_entries')
         .select('id, user_id, percentage_change, created_at')
         .in('user_id', memberIds)
         .order('created_at', { ascending: true })
+
+      // If group has a start date, only include entries from that date onwards
+      if (groupData?.start_date) {
+        query = query.gte('created_at', groupData.start_date)
+      }
+
+      const { data: entries, error: entriesError } = await query
 
       if (entriesError) throw entriesError
 
@@ -72,13 +97,19 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
           ? Math.min(...userEntries.map(e => e.percentage_change))
           : 0
 
-        const days_active = userEntries.length > 0
-          ? Math.ceil((new Date().getTime() - new Date(userEntries[0].created_at).getTime()) / (1000 * 60 * 60 * 24))
+        // Calculate days active since group start date or first entry
+        let startDateForCalculation = groupData?.start_date
+        if (!startDateForCalculation && userEntries.length > 0) {
+          startDateForCalculation = userEntries[0].created_at
+        }
+
+        const days_active = startDateForCalculation
+          ? Math.ceil((new Date().getTime() - new Date(startDateForCalculation).getTime()) / (1000 * 60 * 60 * 24))
           : 0
 
         return {
           user_id: member.user_id,
-          display_name: member.display_name,
+          display_name: (member.profiles as any)?.display_name || 'User',
           entries: userEntries,
           latest_change,
           total_entries: userEntries.length,
@@ -103,7 +134,12 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
       return (
         <div className="text-center py-8 text-gray-500">
           <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">No progress data yet</p>
+          <p className="text-sm">
+            {groupStartDate 
+              ? `No progress data since ${format(new Date(groupStartDate), 'MMM d, yyyy')}`
+              : 'No progress data yet'
+            }
+          </p>
         </div>
       )
     }
@@ -208,7 +244,18 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
           </div>
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Group Progress</h3>
-            <p className="text-sm text-gray-500">{groupName} • {membersProgress.length} members</p>
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <span>{groupName} • {membersProgress.length} members</span>
+              {groupStartDate && (
+                <>
+                  <span>•</span>
+                  <div className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    <span>Since {format(new Date(groupStartDate), 'MMM d, yyyy')}</span>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
         {selectedMember && (
@@ -235,6 +282,9 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 <span>{selectedMemberData.total_entries} entries</span>
                 <span>{selectedMemberData.days_active} days active</span>
+                {groupStartDate && (
+                  <span>since group start</span>
+                )}
               </div>
             </div>
             <div className="text-right">
@@ -246,7 +296,14 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
           </div>
 
           <div className="bg-gray-50 rounded-lg p-4">
-            <h5 className="font-medium text-gray-900 mb-4">Progress Chart</h5>
+            <h5 className="font-medium text-gray-900 mb-4">
+              Progress Chart
+              {groupStartDate && (
+                <span className="text-sm font-normal text-gray-500 ml-2">
+                  (Since {format(new Date(groupStartDate), 'MMM d, yyyy')})
+                </span>
+              )}
+            </h5>
             <MemberChart member={selectedMemberData} />
           </div>
 
@@ -257,6 +314,9 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                 <span className="text-sm font-medium text-blue-900">Total Entries</span>
               </div>
               <div className="text-2xl font-bold text-blue-600">{selectedMemberData.total_entries}</div>
+              {groupStartDate && (
+                <div className="text-xs text-blue-700 mt-1">Since group start</div>
+              )}
             </div>
             
             <div className="bg-green-50 rounded-lg p-4">
@@ -267,6 +327,9 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
               <div className="text-2xl font-bold text-green-600">
                 {selectedMemberData.best_change.toFixed(1)}%
               </div>
+              {groupStartDate && (
+                <div className="text-xs text-green-700 mt-1">Since group start</div>
+              )}
             </div>
             
             <div className="bg-purple-50 rounded-lg p-4">
@@ -275,6 +338,9 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                 <span className="text-sm font-medium text-purple-900">Days Active</span>
               </div>
               <div className="text-2xl font-bold text-purple-600">{selectedMemberData.days_active}</div>
+              {groupStartDate && (
+                <div className="text-xs text-purple-700 mt-1">Since group start</div>
+              )}
             </div>
           </div>
 
@@ -303,7 +369,12 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
             <div className="text-center py-12">
               <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h4 className="text-lg font-medium text-gray-900 mb-2">No Progress Data</h4>
-              <p className="text-gray-500">Group members haven't started tracking their progress yet</p>
+              <p className="text-gray-500">
+                {groupStartDate 
+                  ? `Group members haven't tracked progress since ${format(new Date(groupStartDate), 'MMM d, yyyy')}`
+                  : 'Group members haven\'t started tracking their progress yet'
+                }
+              </p>
             </div>
           ) : (
             <>
@@ -312,6 +383,11 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                 <h4 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-yellow-500" />
                   Progress Leaderboard
+                  {groupStartDate && (
+                    <span className="text-sm font-normal text-gray-500">
+                      (Since {format(new Date(groupStartDate), 'MMM d, yyyy')})
+                    </span>
+                  )}
                 </h4>
                 <div className="space-y-2">
                   {membersProgress.slice(0, 3).map((member, index) => (
@@ -334,6 +410,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                         </div>
                         <div className="text-sm text-gray-500">
                           {member.total_entries} entries • {member.days_active} days
+                          {groupStartDate && ' since start'}
                         </div>
                       </div>
                       <div className="text-right">
@@ -391,7 +468,10 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                       
                       <div className="flex justify-between text-xs text-gray-500 mt-2">
                         <span>{member.total_entries} entries</span>
-                        <span>{member.days_active} days</span>
+                        <span>
+                          {member.days_active} days
+                          {groupStartDate && ' since start'}
+                        </span>
                       </div>
                     </div>
                   ))}

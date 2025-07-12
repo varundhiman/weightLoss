@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { LogOut, User, Scale, Users, Trophy, Bell, BarChart3 } from 'lucide-react'
+import { LogOut, User, Scale, Users, Trophy, Bell, BarChart3, Settings } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
+import { useMobile } from '../../hooks/useMobile'
 import { supabase } from '../../lib/supabase'
 import { WeightEntry } from './WeightEntry'
+import { HeightEntry } from './HeightEntry'
+import { BMIWidget } from './BMIWidget'
 import { ProgressChart } from './ProgressChart'
 import { GroupsList } from '../Groups/GroupsList'
 import { GroupChat } from '../Groups/GroupChat'
 import { GroupProgress } from '../Groups/GroupProgress'
+import { ReminderSettings } from '../Groups/ReminderSettings'
+import { NotificationBell } from '../Notifications/NotificationBell'
 
 interface WeightEntryData {
   id: string
@@ -18,7 +23,8 @@ interface WeightEntryData {
 interface UserProfile {
   id: string
   display_name: string
-  initial_weight: number
+  height?: number
+  initial_weight?: number
 }
 
 interface Group {
@@ -27,14 +33,18 @@ interface Group {
 }
 
 export const Dashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'progress' | 'groups'>('progress')
+  const [activeTab, setActiveTab] = useState<'progress' | 'groups' | 'reminders'>('progress')
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [groupView, setGroupView] = useState<'chat' | 'progress'>('chat')
   const [weightEntries, setWeightEntries] = useState<WeightEntryData[]>([])
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showHeightEntry, setShowHeightEntry] = useState(false)
   const { user, signOut } = useAuth()
+
+  // Check if current user is admin (varundhiman@gmail.com)
+  const isAdmin = user?.email === 'varundhiman@gmail.com'
 
   useEffect(() => {
     if (user) {
@@ -74,22 +84,21 @@ export const Dashboard: React.FC = () => {
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .maybeSingle() // Use maybeSingle() instead of single() to handle no results gracefully
+        .maybeSingle()
 
       if (error) {
         console.error('Error fetching user profile:', error)
         
-        // Check if it's an authentication error (JWT expired)
         if (error.message?.includes('JWT expired') || (error as any).status === 401) {
           await signOut()
           return
         }
         
-        // Set default profile data if fetch fails
         setUserProfile({
           id: user.id,
           display_name: user.user_metadata?.display_name || 'User',
-          initial_weight: parseFloat(user.user_metadata?.initial_weight) || 150
+          height: parseFloat(user.user_metadata?.height) || undefined,
+          initial_weight: parseFloat(user.user_metadata?.initial_weight) || undefined
         })
         return
       }
@@ -97,21 +106,20 @@ export const Dashboard: React.FC = () => {
       if (data) {
         setUserProfile(data)
       } else {
-        // Profile doesn't exist yet, use default values from user metadata
-        // Don't try to create it here - let the useAuth hook handle profile creation
         setUserProfile({
           id: user.id,
           display_name: user.user_metadata?.display_name || 'User',
-          initial_weight: parseFloat(user.user_metadata?.initial_weight) || 150
+          height: parseFloat(user.user_metadata?.height) || undefined,
+          initial_weight: parseFloat(user.user_metadata?.initial_weight) || undefined
         })
       }
     } catch (error) {
       console.error('Error fetching user profile:', error)
-      // Fallback to user metadata
       setUserProfile({
         id: user.id,
         display_name: user.user_metadata?.display_name || 'User',
-        initial_weight: parseFloat(user.user_metadata?.initial_weight) || 150
+        height: parseFloat(user.user_metadata?.height) || undefined,
+        initial_weight: parseFloat(user.user_metadata?.initial_weight) || undefined
       })
     }
   }
@@ -127,7 +135,6 @@ export const Dashboard: React.FC = () => {
         .order('created_at', { ascending: true })
 
       if (error) {
-        // Check if it's an authentication error (JWT expired)
         if (error.message?.includes('JWT expired') || (error as any).status === 401) {
           await signOut()
           return
@@ -144,11 +151,16 @@ export const Dashboard: React.FC = () => {
 
   const handleSelectGroup = (groupId: string) => {
     setSelectedGroupId(groupId)
-    setGroupView('chat') // Default to chat when selecting a group
+    setGroupView('progress')
   }
 
   const handleSignOut = async () => {
     await signOut()
+  }
+
+  const handleHeightAdded = () => {
+    setShowHeightEntry(false)
+    fetchUserProfile()
   }
 
   if (loading) {
@@ -161,6 +173,9 @@ export const Dashboard: React.FC = () => {
       </div>
     )
   }
+
+  const hasHeight = userProfile?.height && userProfile.height > 0
+  const hasWeightEntries = weightEntries.length > 0
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-green-50">
@@ -179,9 +194,7 @@ export const Dashboard: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-4">
-              <button className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Bell className="w-5 h-5" />
-              </button>
+              <NotificationBell />
               <button
                 onClick={handleSignOut}
                 className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors"
@@ -219,74 +232,130 @@ export const Dashboard: React.FC = () => {
             <Users className="w-4 h-4 inline mr-2" />
             Groups
           </button>
+          {/* Only show reminders tab for admin user */}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('reminders')}
+              className={`px-4 py-2 rounded-md font-medium transition-all ${
+                activeTab === 'reminders'
+                  ? 'bg-white text-purple-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Settings className="w-4 h-4 inline mr-2" />
+              Reminders
+            </button>
+          )}
         </div>
       </div>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
         {activeTab === 'progress' ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Weight Entry */}
-            <div className="lg:col-span-1">
-              <WeightEntry
-                onEntryAdded={fetchWeightEntries}
-                initialWeight={userProfile?.initial_weight || 150}
+          <div className="space-y-6">
+            {/* Height Entry Widget (if height is missing) */}
+            {!hasHeight && !showHeightEntry && (
+              <div className="bg-gradient-to-r from-purple-100 to-blue-100 border border-purple-200 rounded-xl p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Scale className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Complete Your Profile</h3>
+                      <p className="text-gray-600">Add your height to unlock BMI tracking and better health insights</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowHeightEntry(true)}
+                    className="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors"
+                  >
+                    Add Height
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Height Entry Form */}
+            {showHeightEntry && (
+              <HeightEntry
+                onHeightAdded={handleHeightAdded}
+                onClose={() => setShowHeightEntry(false)}
               />
-            </div>
+            )}
 
-            {/* Progress Chart */}
-            <div className="lg:col-span-2">
-              <ProgressChart entries={weightEntries} />
-            </div>
+            {/* BMI Widget (if height and weight entries exist) */}
+            {hasHeight && hasWeightEntries && (
+              <BMIWidget userHeight={userProfile?.height} />
+            )}
 
-            {/* Stats Cards */}
-            <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Scale className="w-6 h-6 text-blue-600" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Weight Entry */}
+              <div className="lg:col-span-1">
+                <WeightEntry
+                  onEntryAdded={fetchWeightEntries}
+                  userHeight={userProfile?.height}
+                />
+              </div>
+
+              {/* Progress Chart */}
+              <div className="lg:col-span-2">
+                <ProgressChart entries={weightEntries} />
+              </div>
+
+              {/* Stats Cards */}
+              <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Scale className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Total Entries</p>
+                      <p className="text-2xl font-bold text-gray-900">{weightEntries.length}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Total Entries</p>
-                    <p className="text-2xl font-bold text-gray-900">{weightEntries.length}</p>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                      <Trophy className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Best Change</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {weightEntries.length > 0
+                          ? `${Math.min(...weightEntries.map(e => e.percentage_change)).toFixed(1)}%`
+                          : '0%'
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                      <Users className="w-6 h-6 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Days Active</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {weightEntries.length > 0
+                          ? Math.ceil((new Date().getTime() - new Date(weightEntries[0].created_at).getTime()) / (1000 * 60 * 60 * 24))
+                          : 0
+                        }
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                    <Trophy className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Best Change</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {weightEntries.length > 0
-                        ? `${Math.min(...weightEntries.map(e => e.percentage_change)).toFixed(1)}%`
-                        : '0%'
-                      }
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <Users className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Days Active</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {weightEntries.length > 0
-                        ? Math.ceil((new Date().getTime() - new Date(weightEntries[0].created_at).getTime()) / (1000 * 60 * 60 * 24))
-                        : 0
-                      }
-                    </p>
-                  </div>
-                </div>
-              </div>
             </div>
+          </div>
+        ) : activeTab === 'reminders' && isAdmin ? (
+          <div className="max-w-4xl mx-auto">
+            <ReminderSettings />
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

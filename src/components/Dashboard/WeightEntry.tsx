@@ -1,14 +1,14 @@
 import React, { useState } from 'react'
-import { Plus, Scale, Calendar, StickyNote } from 'lucide-react'
+import { Plus, Scale, Calendar, StickyNote, Activity } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 
 interface WeightEntryProps {
   onEntryAdded: () => void
-  initialWeight: number
+  userHeight?: number
 }
 
-export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, initialWeight }) => {
+export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeight }) => {
   const [weight, setWeight] = useState('')
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs')
   const [notes, setNotes] = useState('')
@@ -24,21 +24,52 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, initialW
     return unit === 'kg' ? weightInLbs / 2.20462 : weightInLbs
   }
 
+  const calculateBMI = (weightInKg: number, heightInCm: number): number => {
+    const heightInM = heightInCm / 100
+    return weightInKg / (heightInM * heightInM)
+  }
+
+  const getBMICategory = (bmi: number): { category: string; color: string } => {
+    if (bmi < 18.5) return { category: 'Underweight', color: 'text-blue-600' }
+    if (bmi < 25) return { category: 'Normal', color: 'text-green-600' }
+    if (bmi < 30) return { category: 'Overweight', color: 'text-yellow-600' }
+    return { category: 'Obese', color: 'text-red-600' }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || !weight) return
 
     setLoading(true)
     try {
-      // Convert current weight to lbs for calculation (since initial weight is stored in lbs)
+      // Convert current weight to lbs for calculation and storage
       const currentWeightInLbs = convertToLbs(parseFloat(weight), weightUnit)
-      const percentageChange = ((currentWeightInLbs - initialWeight) / initialWeight) * 100
+      
+      // For percentage calculation, we need the initial weight
+      // Since we're transitioning from weight-based to height-based system,
+      // we'll use the first weight entry as the baseline if no initial_weight exists
+      const { data: firstEntry } = await supabase
+        .from('weight_entries')
+        .select('weight')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single()
+
+      let baselineWeight = firstEntry?.weight || currentWeightInLbs
+      
+      // If this is the first entry, use current weight as baseline
+      if (!firstEntry) {
+        baselineWeight = currentWeightInLbs
+      }
+
+      const percentageChange = ((currentWeightInLbs - baselineWeight) / baselineWeight) * 100
 
       const { error } = await supabase
         .from('weight_entries')
         .insert({
           user_id: user.id,
-          weight: currentWeightInLbs, // Store in lbs for consistency
+          weight: currentWeightInLbs,
           percentage_change: percentageChange,
           notes: notes || null
         })
@@ -56,11 +87,14 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, initialW
     }
   }
 
-  const getPercentageChange = () => {
-    if (!weight) return null
-    const currentWeightInLbs = convertToLbs(parseFloat(weight), weightUnit)
-    return ((currentWeightInLbs - initialWeight) / initialWeight * 100).toFixed(1)
+  const getCurrentBMI = () => {
+    if (!weight || !userHeight) return null
+    const weightInKg = weightUnit === 'kg' ? parseFloat(weight) : parseFloat(weight) / 2.20462
+    return calculateBMI(weightInKg, userHeight)
   }
+
+  const currentBMI = getCurrentBMI()
+  const bmiInfo = currentBMI ? getBMICategory(currentBMI) : null
 
   if (!isOpen) {
     return (
@@ -135,17 +169,29 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, initialW
               </button>
             </div>
           </div>
-          {weight && (
-            <div className="mt-2 p-2 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-600">
-                Change: <span className={`font-medium ${parseFloat(getPercentageChange()!) >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  {parseFloat(getPercentageChange()!) >= 0 ? '+' : ''}{getPercentageChange()}%
+          
+          {/* BMI Display */}
+          {currentBMI && bmiInfo && (
+            <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <Activity className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700">BMI Information</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">
+                  BMI: <span className="font-medium">{currentBMI.toFixed(1)}</span>
                 </span>
-              </p>
-              <p className="text-xs text-gray-500">
-                Starting weight: {convertFromLbs(initialWeight, weightUnit).toFixed(1)} {weightUnit}
-              </p>
+                <span className={`text-sm font-medium ${bmiInfo.color}`}>
+                  {bmiInfo.category}
+                </span>
+              </div>
             </div>
+          )}
+          
+          {!userHeight && (
+            <p className="text-xs text-gray-500 mt-1">
+              Add your height in your profile to see BMI calculations
+            </p>
           )}
         </div>
 

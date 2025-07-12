@@ -70,7 +70,9 @@ export const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName }) => {
         .from('group_members')
         .select(`
           user_id,
-          display_name
+          profiles!inner (
+            display_name
+          )
         `)
         .eq('group_id', groupId)
 
@@ -78,7 +80,7 @@ export const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName }) => {
 
       const profilesMap: Record<string, string> = {}
       data?.forEach(member => {
-        profilesMap[member.user_id] = member.display_name
+        profilesMap[member.user_id] = (member.profiles as any)?.display_name || 'User'
       })
       setUserProfiles(profilesMap)
     } catch (error) {

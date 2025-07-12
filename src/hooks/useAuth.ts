@@ -24,14 +24,14 @@ export const useAuth = () => {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string, displayName: string, initialWeight: number) => {
+  const signUp = async (email: string, password: string, displayName: string, height: number) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           display_name: displayName,
-          initial_weight: initialWeight.toString()
+          height: height.toString()
         }
       }
     })
@@ -44,7 +44,7 @@ export const useAuth = () => {
           id: data.user.id,
           email: data.user.email!,
           display_name: displayName,
-          initial_weight: initialWeight
+          height: height
         })
 
       if (profileError) {
@@ -75,11 +75,21 @@ export const useAuth = () => {
     return result
   }
 
+  const resetPassword = async (email: string) => {
+    // Always use the production URL for password reset emails
+    const baseUrl = 'https://glowing-cobbler-be0e91.netlify.app'
+    
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${baseUrl}/reset-password`
+    })
+    return { data, error }
+  }
   return {
     user,
     loading,
     signUp,
     signIn,
-    signOut
+    signOut,
+    resetPassword
   }
 }
