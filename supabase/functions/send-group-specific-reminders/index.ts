@@ -254,6 +254,10 @@ function createReminderEmailBody(user: ReminderUser): string {
 
 async function sendReminderEmail(email: string, subject: string, body: string): Promise<boolean> {
   try {
+    // Wait 2 seconds before sending the email
+    console.log(`⏳ Waiting 2 seconds before sending email to ${email}...`)
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
     const resendApiKey = Deno.env.get('RESEND_API_KEY')
     
     if (!resendApiKey) {
