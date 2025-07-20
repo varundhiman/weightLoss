@@ -128,7 +128,7 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
 
         {/* Meme Card */}
         {showMeme && currentMeme && (
-          <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-green-200">
+          <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-green-200">
             <div className="text-center mb-4">
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
                 {currentMeme.bucket === 'weight-loss-memes' ? '🎉 Great job! You lost weight!' : '💪 Every journey has ups and downs!'}
@@ -138,7 +138,7 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
               <img
                 src={currentMeme.url}
                 alt="Motivational meme"
-                className="w-full h-auto max-h-64 object-contain bg-gray-50"
+                className="w-full h-auto max-h-80 sm:max-h-64 object-contain bg-gray-50"
                 onError={(e) => {
                   console.error('Error loading meme image:', e)
                   e.currentTarget.style.display = 'none'
