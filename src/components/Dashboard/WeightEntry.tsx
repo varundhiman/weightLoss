@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Plus, Scale, StickyNote, Activity } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
-import { getMemeForWeightChange, getPreviousWeight, MemeData } from '../../lib/memeUtils'
+import { getMemeForWeightChange, getPreviousWeight, MemeData, getRandomMeme } from '../../lib/memeUtils'
 
 interface WeightEntryProps {
   onEntryAdded: () => void
@@ -17,6 +17,11 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
   const [isOpen, setIsOpen] = useState(false)
   const [showMeme, setShowMeme] = useState(false)
   const [currentMeme, setCurrentMeme] = useState<MemeData | null>(null)
+  const [preloadedMemes, setPreloadedMemes] = useState<{
+    weightLoss: MemeData | null
+    weightGain: MemeData | null
+  }>({ weightLoss: null, weightGain: null })
+  const [previousWeight, setPreviousWeight] = useState<number | null>(null)
   const { user } = useAuth()
 
   const convertToLbs = (weight: number, unit: 'lbs' | 'kg'): number => {
@@ -78,13 +83,23 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
 
       if (error) throw error
 
-      // Show meme immediately after successful save
-      const meme = await getMemeForWeightChange(currentWeightInLbs, previousWeight)
-      console.log('Hi');
-      console.log(meme);
-      if (meme) {
-        console.log()
-        setCurrentMeme(meme)
+      // Show preloaded meme instantly based on weight change
+      let selectedMeme: MemeData | null = null
+
+      if (previousWeight === null) {
+        // First entry - show weight loss meme as encouragement
+        selectedMeme = preloadedMemes.weightLoss
+      } else if (currentWeightInLbs < previousWeight) {
+        // Lost weight - show weight loss meme
+        selectedMeme = preloadedMemes.weightLoss
+      } else {
+        // Gained weight - show weight gain meme
+        selectedMeme = preloadedMemes.weightGain
+      }
+
+      console.log('Selected meme:', selectedMeme)
+      if (selectedMeme) {
+        setCurrentMeme(selectedMeme)
         setShowMeme(true)
       }
 
@@ -114,6 +129,61 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
     setCurrentMeme(null)
     setIsOpen(true)
   }
+
+  // Preload memes and previous weight when form opens
+  useEffect(() => {
+    if (isOpen && user) {
+      const preloadData = async () => {
+        try {
+          // Preload both types of memes in parallel
+          const [weightLossMeme, weightGainMeme, prevWeight] = await Promise.all([
+            getRandomMeme('weight-loss-memes'),
+            getRandomMeme('weight-gain-memes'),
+            getPreviousWeight(user.id)
+          ])
+
+          // Preload the actual images to cache them
+          const preloadPromises = []
+          if (weightLossMeme) {
+            const img1 = new Image()
+            img1.src = weightLossMeme.url
+            preloadPromises.push(
+              new Promise((resolve) => {
+                img1.onload = resolve
+                img1.onerror = resolve // Don't fail if image doesn't load
+              })
+            )
+          }
+
+          if (weightGainMeme) {
+            const img2 = new Image()
+            img2.src = weightGainMeme.url
+            preloadPromises.push(
+              new Promise((resolve) => {
+                img2.onload = resolve
+                img2.onerror = resolve // Don't fail if image doesn't load
+              })
+            )
+          }
+
+          // Wait for images to actually download
+          await Promise.all(preloadPromises)
+
+          setPreloadedMemes({
+            weightLoss: weightLossMeme,
+            weightGain: weightGainMeme
+          })
+          setPreviousWeight(prevWeight)
+
+          console.log('Preloaded data and images:', { weightLossMeme, weightGainMeme, prevWeight })
+        } catch (error) {
+          console.error('Error preloading data:', error)
+        }
+      }
+
+      preloadData()
+    }
+  }, [isOpen, user])
 
   if (!isOpen) {
     return (
