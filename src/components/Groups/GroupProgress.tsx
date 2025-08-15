@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { TrendingDown, TrendingUp, Users, Trophy, Calendar } from 'lucide-react'
+import { TrendingDown, TrendingUp, Users, Trophy, Calendar, Scale, Award } from 'lucide-react'
 import { format } from 'date-fns'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
+import { calculateGroupWeightLoss, isGroupInactive, WeightLossDetail } from '../../lib/groupUtils'
 
 interface MemberProgress {
   user_id: string
@@ -28,6 +29,9 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
   const [loading, setLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState<string | null>(null)
   const [groupStartDate, setGroupStartDate] = useState<string | null>(null)
+  const [groupEndDate, setGroupEndDate] = useState<string | null>(null)
+  const [totalWeightLost, setTotalWeightLost] = useState<number | null>(null)
+  const [weightLossDetails, setWeightLossDetails] = useState<WeightLossDetail[]>([])
   const { user } = useAuth()
 
   useEffect(() => {
@@ -38,15 +42,37 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
   const fetchGroupProgress = async () => {
     try {
-      // First, get the group's start date
+      // First, get the group's data including end_date and total_weight_lost
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
-        .select('start_date')
+        .select('start_date, end_date, total_weight_lost')
         .eq('id', groupId)
         .single()
 
       if (groupError) throw groupError
       setGroupStartDate(groupData?.start_date || null)
+      setGroupEndDate(groupData?.end_date || null)
+      setTotalWeightLost(groupData?.total_weight_lost || null)
+
+      // Check if group is inactive and calculate weight loss if needed
+      const inactive = isGroupInactive(groupData?.end_date)
+      if (inactive) {
+        try {
+          const weightLossResult = await calculateGroupWeightLoss(groupId)
+          setWeightLossDetails(weightLossResult.members)
+          
+          // Update the database if total_weight_lost is not set
+          if (groupData?.total_weight_lost === null && weightLossResult.total_weight_lost > 0) {
+            await supabase
+              .from('groups')
+              .update({ total_weight_lost: weightLossResult.total_weight_lost })
+              .eq('id', groupId)
+            setTotalWeightLost(weightLossResult.total_weight_lost)
+          }
+        } catch (error) {
+          console.error('Error calculating weight loss for inactive group:', error)
+        }
+      }
 
       // Get all group members with their profile information
       const { data: members, error: membersError } = await supabase
@@ -235,15 +261,20 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
     ? membersProgress.find(m => m.user_id === selectedMember)
     : null
 
+  const inactive = isGroupInactive(groupEndDate)
+
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center">
-            <Trophy className="w-5 h-5 text-white" />
+          <div className={`w-10 h-10 bg-gradient-to-r ${inactive ? 'from-purple-500 to-pink-500' : 'from-green-500 to-blue-500'} rounded-full flex items-center justify-center`}>
+            {inactive ? <Award className="w-5 h-5 text-white" /> : <Trophy className="w-5 h-5 text-white" />}
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Group Progress</h3>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Group Progress
+              {inactive && <span className="ml-2 text-sm bg-purple-100 text-purple-800 px-2 py-1 rounded-full">Completed</span>}
+            </h3>
             <div className="flex items-center gap-2 text-sm text-gray-500">
               <span>{groupName} • {membersProgress.length} members</span>
               {groupStartDate && (
@@ -251,7 +282,10 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                   <span>•</span>
                   <div className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
-                    <span>Since {format(new Date(groupStartDate), 'MMM d, yyyy')}</span>
+                    <span>
+                      {format(new Date(groupStartDate), 'MMM d, yyyy')}
+                      {inactive && groupEndDate && ` - ${format(new Date(groupEndDate), 'MMM d, yyyy')}`}
+                    </span>
                   </div>
                 </>
               )}
@@ -267,6 +301,61 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
           </button>
         )}
       </div>
+
+      {/* Total Weight Loss Banner for Inactive Groups */}
+      {inactive && (totalWeightLost !== null || weightLossDetails.length > 0) && (
+        <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                <Scale className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h4 className="text-xl font-bold text-gray-900 mb-1">
+                  🎉 Group Challenge Complete!
+                </h4>
+                <p className="text-gray-600">
+                  Total weight lost by the entire group
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-4xl font-bold text-purple-600">
+                {totalWeightLost?.toFixed(1) || weightLossDetails.reduce((sum, member) => sum + member.weight_loss, 0).toFixed(1)} lbs
+              </div>
+              <div className="text-sm text-purple-500 font-medium">
+                Combined Weight Loss
+              </div>
+            </div>
+          </div>
+          
+          {weightLossDetails.length > 0 && (
+            <div className="mt-6">
+              <h5 className="font-semibold text-gray-900 mb-3">Weight Loss Champions</h5>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {weightLossDetails.slice(0, 6).map((member, index) => (
+                  <div key={member.email} className="bg-white rounded-lg p-3 border border-purple-100">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                          index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-purple-400'
+                        }`}>
+                          {index + 1}
+                        </div>
+                        <span className="font-medium text-gray-900 text-sm">{member.display_name}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-green-600 text-sm">-{member.weight_loss.toFixed(1)} lbs</div>
+                        <div className="text-xs text-gray-500">{member.weight_loss_percentage.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {selectedMemberData ? (
         // Detailed view for selected member
