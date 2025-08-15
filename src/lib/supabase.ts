@@ -62,6 +62,7 @@ export type Database = {
           invite_code: string
           start_date: string | null
           end_date: string | null
+          total_weight_lost: number | null
           created_at: string
         }
         Insert: {
@@ -71,12 +72,14 @@ export type Database = {
           invite_code: string
           start_date?: string | null
           end_date?: string | null
+          total_weight_lost?: number | null
         }
         Update: {
           name?: string
           description?: string | null
           start_date?: string | null
           end_date?: string | null
+          total_weight_lost?: number | null
         }
       }
       group_members: {
