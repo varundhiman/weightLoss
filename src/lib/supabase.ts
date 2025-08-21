@@ -39,6 +39,7 @@ export type Database = {
           weight: number
           percentage_change: number
           notes: string | null
+          is_private: boolean
           created_at: string
         }
         Insert: {
@@ -46,11 +47,13 @@ export type Database = {
           weight: number
           percentage_change: number
           notes?: string | null
+          is_private?: boolean
         }
         Update: {
           weight?: number
           percentage_change?: number
           notes?: string | null
+          is_private?: boolean
         }
       }
       groups: {

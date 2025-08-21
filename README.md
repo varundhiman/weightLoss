@@ -2,6 +2,11 @@
 
 A private weight loss tracking application with group support, built with React and Capacitor for cross-platform mobile deployment.
 
+*****************
+** npm run dev **
+*****************
+
+
 ## Features
 
 - 🔐 Private weight tracking with percentage-based sharing

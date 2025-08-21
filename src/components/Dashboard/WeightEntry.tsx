@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Scale, StickyNote, Activity } from 'lucide-react'
+import { Plus, Scale, StickyNote, Activity, Lock, Unlock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { getMemeForWeightChange, getPreviousWeight, MemeData, getRandomMeme } from '../../lib/memeUtils'
@@ -13,6 +13,7 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
   const [weight, setWeight] = useState('')
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs')
   const [notes, setNotes] = useState('')
+  const [isPrivate, setIsPrivate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [showMeme, setShowMeme] = useState(false)
@@ -78,7 +79,8 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
           user_id: user.id,
           weight: currentWeightInLbs,
           percentage_change: percentageChange,
-          notes: notes || null
+          notes: notes || null,
+          is_private: isPrivate
         })
 
       if (error) throw error
@@ -105,6 +107,7 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
 
       setWeight('')
       setNotes('')
+      setIsPrivate(false)
       setIsOpen(false)
       onEntryAdded()
     } catch (error) {
@@ -328,6 +331,42 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
                 placeholder="How are you feeling? Any observations?"
               />
             </div>
+          </div>
+
+          {/* Private Logging Toggle */}
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-3">
+              {isPrivate ? (
+                <Lock className="w-5 h-5 text-purple-500" />
+              ) : (
+                <Unlock className="w-5 h-5 text-gray-400" />
+              )}
+              <div>
+                <label htmlFor="private-toggle" className="text-sm font-medium text-gray-900 cursor-pointer">
+                  Log Privately
+                </label>
+                <p className="text-xs text-gray-500">
+                  {isPrivate 
+                    ? "This entry will only be visible to you" 
+                    : "This entry will be visible in your groups"
+                  }
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="private-toggle"
+              onClick={() => setIsPrivate(!isPrivate)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${
+                isPrivate ? 'bg-purple-500' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  isPrivate ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
           </div>
 
           <div className="flex gap-3">
