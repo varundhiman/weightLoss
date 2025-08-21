@@ -95,11 +95,12 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
       // Get weight entries for all members
       const memberIds = members.map(m => m.user_id)
       
-      // Build the query - filter by start date if it exists
+      // Build the query - filter by start date if it exists and exclude private entries
       let query = supabase
         .from('weight_entries')
         .select('id, user_id, percentage_change, created_at')
         .in('user_id', memberIds)
+        .eq('is_private', false) // Exclude private entries from group calculations
         .order('created_at', { ascending: true })
 
       // If group has a start date, only include entries from that date onwards

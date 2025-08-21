@@ -1,137 +1,147 @@
-import React, { useState, useEffect } from 'react'
-import { Plus, Scale, StickyNote, Activity, Lock, Unlock } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../hooks/useAuth'
-import { getMemeForWeightChange, getPreviousWeight, MemeData, getRandomMeme } from '../../lib/memeUtils'
+import React, { useEffect, useState } from "react";
+import { Activity, Lock, Plus, Scale, StickyNote, Unlock } from "lucide-react";
+import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  getMemeForWeightChange,
+  getPreviousWeight,
+  getRandomMeme,
+  MemeData,
+} from "../../lib/memeUtils";
 
 interface WeightEntryProps {
-  onEntryAdded: () => void
-  userHeight?: number
+  onEntryAdded: () => void;
+  userHeight?: number;
 }
 
-export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeight }) => {
-  const [weight, setWeight] = useState('')
-  const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs')
-  const [notes, setNotes] = useState('')
-  const [isPrivate, setIsPrivate] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [isOpen, setIsOpen] = useState(false)
-  const [showMeme, setShowMeme] = useState(false)
-  const [currentMeme, setCurrentMeme] = useState<MemeData | null>(null)
+export const WeightEntry: React.FC<WeightEntryProps> = (
+  { onEntryAdded, userHeight },
+) => {
+  const [weight, setWeight] = useState("");
+  const [weightUnit, setWeightUnit] = useState<"lbs" | "kg">("lbs");
+  const [notes, setNotes] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [showMeme, setShowMeme] = useState(false);
+  const [currentMeme, setCurrentMeme] = useState<MemeData | null>(null);
   const [preloadedMemes, setPreloadedMemes] = useState<{
-    weightLoss: MemeData | null
-    weightGain: MemeData | null
-  }>({ weightLoss: null, weightGain: null })
-  const [previousWeight, setPreviousWeight] = useState<number | null>(null)
-  const { user } = useAuth()
+    weightLoss: MemeData | null;
+    weightGain: MemeData | null;
+  }>({ weightLoss: null, weightGain: null });
+  const [previousWeight, setPreviousWeight] = useState<number | null>(null);
+  const { user } = useAuth();
 
-  const convertToLbs = (weight: number, unit: 'lbs' | 'kg'): number => {
-    return unit === 'kg' ? weight * 2.20462 : weight
-  }
+  const convertToLbs = (weight: number, unit: "lbs" | "kg"): number => {
+    return unit === "kg" ? weight * 2.20462 : weight;
+  };
 
-  const convertFromLbs = (weightInLbs: number, unit: 'lbs' | 'kg'): number => {
-    return unit === 'kg' ? weightInLbs / 2.20462 : weightInLbs
-  }
+  const convertFromLbs = (weightInLbs: number, unit: "lbs" | "kg"): number => {
+    return unit === "kg" ? weightInLbs / 2.20462 : weightInLbs;
+  };
 
   const calculateBMI = (weightInKg: number, heightInCm: number): number => {
-    const heightInM = heightInCm / 100
-    return weightInKg / (heightInM * heightInM)
-  }
+    const heightInM = heightInCm / 100;
+    return weightInKg / (heightInM * heightInM);
+  };
 
   const getBMICategory = (bmi: number): { category: string; color: string } => {
-    if (bmi < 18.5) return { category: 'Underweight', color: 'text-blue-600' }
-    if (bmi < 25) return { category: 'Normal', color: 'text-green-600' }
-    if (bmi < 30) return { category: 'Overweight', color: 'text-yellow-600' }
-    return { category: 'Obese', color: 'text-red-600' }
-  }
+    if (bmi < 18.5) return { category: "Underweight", color: "text-blue-600" };
+    if (bmi < 25) return { category: "Normal", color: "text-green-600" };
+    if (bmi < 30) return { category: "Overweight", color: "text-yellow-600" };
+    return { category: "Obese", color: "text-red-600" };
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user || !weight) return
+    e.preventDefault();
+    if (!user || !weight) return;
 
-    setLoading(true)
+    setLoading(true);
     try {
       // Convert current weight to lbs for calculation and storage
-      const currentWeightInLbs = convertToLbs(parseFloat(weight), weightUnit)
+      const currentWeightInLbs = convertToLbs(parseFloat(weight), weightUnit);
 
       // Get previous weight for meme selection
-      const previousWeight = await getPreviousWeight(user.id)
+      const previousWeight = await getPreviousWeight(user.id);
 
       // For percentage calculation, we need the initial weight
       const { data: firstEntry } = await supabase
-        .from('weight_entries')
-        .select('weight')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
+        .from("weight_entries")
+        .select("weight")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
         .limit(1)
-        .single()
+        .single();
 
-      let baselineWeight = firstEntry?.weight || currentWeightInLbs
+      let baselineWeight = firstEntry?.weight || currentWeightInLbs;
       if (!firstEntry) {
-        baselineWeight = currentWeightInLbs
+        baselineWeight = currentWeightInLbs;
       }
 
-      const percentageChange = ((currentWeightInLbs - baselineWeight) / baselineWeight) * 100
+      const percentageChange =
+        ((currentWeightInLbs - baselineWeight) / baselineWeight) * 100;
 
       const { error } = await supabase
-        .from('weight_entries')
+        .from("weight_entries")
         .insert({
           user_id: user.id,
           weight: currentWeightInLbs,
           percentage_change: percentageChange,
           notes: notes || null,
-          is_private: isPrivate
-        })
+          is_private: isPrivate,
+        });
 
-      if (error) throw error
+      if (error) throw error;
 
       // Show preloaded meme instantly based on weight change
-      let selectedMeme: MemeData | null = null
+      let selectedMeme: MemeData | null = null;
 
       if (previousWeight === null) {
         // First entry - show weight loss meme as encouragement
-        selectedMeme = preloadedMemes.weightLoss
+        selectedMeme = preloadedMemes.weightLoss;
       } else if (currentWeightInLbs < previousWeight) {
         // Lost weight - show weight loss meme
-        selectedMeme = preloadedMemes.weightLoss
+        selectedMeme = preloadedMemes.weightLoss;
       } else {
         // Gained weight - show weight gain meme
-        selectedMeme = preloadedMemes.weightGain
+        selectedMeme = preloadedMemes.weightGain;
       }
 
-      console.log('Selected meme:', selectedMeme)
+      console.log("Selected meme:", selectedMeme);
       if (selectedMeme) {
-        setCurrentMeme(selectedMeme)
-        setShowMeme(true)
+        setCurrentMeme(selectedMeme);
+        setShowMeme(true);
       }
 
-      setWeight('')
-      setNotes('')
-      setIsPrivate(false)
-      setIsOpen(false)
-      onEntryAdded()
+      setWeight("");
+      setNotes("");
+      setIsPrivate(false);
+      setIsOpen(false);
+      onEntryAdded();
     } catch (error) {
-      console.error('Error adding weight entry:', error)
+      console.error("Error adding weight entry:", error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const getCurrentBMI = () => {
-    if (!weight || !userHeight) return null
-    const weightInKg = weightUnit === 'kg' ? parseFloat(weight) : parseFloat(weight) / 2.20462
-    return calculateBMI(weightInKg, userHeight)
-  }
+    if (!weight || !userHeight) return null;
+    const weightInKg = weightUnit === "kg"
+      ? parseFloat(weight)
+      : parseFloat(weight) / 2.20462;
+    return calculateBMI(weightInKg, userHeight);
+  };
 
-  const currentBMI = getCurrentBMI()
-  const bmiInfo = currentBMI ? getBMICategory(currentBMI) : null
+  const currentBMI = getCurrentBMI();
+  const bmiInfo = currentBMI ? getBMICategory(currentBMI) : null;
 
   const handleOpenForm = () => {
     // Reset meme state when opening the form
-    setShowMeme(false)
-    setCurrentMeme(null)
-    setIsOpen(true)
-  }
+    setShowMeme(false);
+    setCurrentMeme(null);
+    setIsOpen(true);
+  };
 
   // Preload memes and previous weight when form opens
   useEffect(() => {
@@ -139,54 +149,59 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
       const preloadData = async () => {
         try {
           // Preload both types of memes in parallel
-          const [weightLossMeme, weightGainMeme, prevWeight] = await Promise.all([
-            getRandomMeme('weight-loss-memes'),
-            getRandomMeme('weight-gain-memes'),
-            getPreviousWeight(user.id)
-          ])
+          const [weightLossMeme, weightGainMeme, prevWeight] = await Promise
+            .all([
+              getRandomMeme("weight-loss-memes"),
+              getRandomMeme("weight-gain-memes"),
+              getPreviousWeight(user.id),
+            ]);
 
           // Preload the actual images to cache them
-          const preloadPromises = []
+          const preloadPromises = [];
           if (weightLossMeme) {
-            const img1 = new Image()
-            img1.src = weightLossMeme.url
+            const img1 = new Image();
+            img1.src = weightLossMeme.url;
             preloadPromises.push(
               new Promise((resolve) => {
-                img1.onload = resolve
-                img1.onerror = resolve // Don't fail if image doesn't load
-              })
-            )
+                img1.onload = resolve;
+                img1.onerror = resolve; // Don't fail if image doesn't load
+              }),
+            );
           }
 
           if (weightGainMeme) {
-            const img2 = new Image()
-            img2.src = weightGainMeme.url
+            const img2 = new Image();
+            img2.src = weightGainMeme.url;
             preloadPromises.push(
               new Promise((resolve) => {
-                img2.onload = resolve
-                img2.onerror = resolve // Don't fail if image doesn't load
-              })
-            )
+                img2.onload = resolve;
+                img2.onerror = resolve; // Don't fail if image doesn't load
+              }),
+            );
           }
 
           // Wait for images to actually download
-          await Promise.all(preloadPromises)
+          await Promise.all(preloadPromises);
 
           setPreloadedMemes({
             weightLoss: weightLossMeme,
-            weightGain: weightGainMeme
-          })
-          setPreviousWeight(prevWeight)
+            weightGain: weightGainMeme,
+          });
+          setPreviousWeight(prevWeight);
 
-          console.log('Preloaded data and images:', { weightLossMeme, weightGainMeme, prevWeight })
+          console.log("Preloaded data and images:", {
+            weightLossMeme,
+            weightGainMeme,
+            prevWeight,
+          });
         } catch (error) {
-          console.error('Error preloading data:', error)
+          console.error("Error preloading data:", error);
         }
-      }
+      };
 
-      preloadData()
+      preloadData();
     }
-  }, [isOpen, user])
+  }, [isOpen, user]);
 
   if (!isOpen) {
     return (
@@ -204,7 +219,9 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
           <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-green-200">
             <div className="text-center mb-4">
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {currentMeme.bucket === 'weight-loss-memes' ? '🎉 Great job! You lost weight!' : '💪 Every journey has ups and downs!'}
+                {currentMeme.bucket === "weight-loss-memes"
+                  ? "🎉 Great job! You lost weight!"
+                  : "💪 Every journey has ups and downs!"}
               </h3>
             </div>
             <div className="relative rounded-xl overflow-hidden shadow-lg mb-4">
@@ -213,8 +230,8 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
                 alt="Motivational meme"
                 className="w-full h-auto max-h-80 sm:max-h-64 object-contain bg-gray-50"
                 onError={(e) => {
-                  console.error('Error loading meme image:', e)
-                  e.currentTarget.style.display = 'none'
+                  console.error("Error loading meme image:", e);
+                  e.currentTarget.style.display = "none";
                 }}
               />
             </div>
@@ -227,7 +244,7 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
           </div>
         )}
       </div>
-    )
+    );
   }
 
   return (
@@ -248,7 +265,10 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="weight" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="weight"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Current Weight
             </label>
             <div className="flex gap-2">
@@ -259,32 +279,34 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
                   type="number"
                   step="0.1"
                   min="1"
-                  max={weightUnit === 'lbs' ? '1000' : '450'}
+                  max={weightUnit === "lbs" ? "1000" : "450"}
                   value={weight}
                   onChange={(e) => setWeight(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder={weightUnit === 'lbs' ? '150.0' : '68.0'}
+                  placeholder={weightUnit === "lbs" ? "150.0" : "68.0"}
                   required
                 />
               </div>
               <div className="flex bg-gray-100 rounded-lg p-1">
                 <button
                   type="button"
-                  onClick={() => setWeightUnit('lbs')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${weightUnit === 'lbs'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                  onClick={() => setWeightUnit("lbs")}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                    weightUnit === "lbs"
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
                 >
                   lbs
                 </button>
                 <button
                   type="button"
-                  onClick={() => setWeightUnit('kg')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${weightUnit === 'kg'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                  onClick={() => setWeightUnit("kg")}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                    weightUnit === "kg"
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
                 >
                   kg
                 </button>
@@ -296,11 +318,14 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
               <div className="mt-2 p-3 bg-gray-50 rounded-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <Activity className="w-4 h-4 text-gray-500" />
-                  <span className="text-sm font-medium text-gray-700">BMI Information</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    BMI Information
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">
-                    BMI: <span className="font-medium">{currentBMI.toFixed(1)}</span>
+                    BMI:{" "}
+                    <span className="font-medium">{currentBMI.toFixed(1)}</span>
                   </span>
                   <span className={`text-sm font-medium ${bmiInfo.color}`}>
                     {bmiInfo.category}
@@ -317,7 +342,10 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
           </div>
 
           <div>
-            <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="notes"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Notes (Optional)
             </label>
             <div className="relative">
@@ -336,20 +364,20 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
           {/* Private Logging Toggle */}
           <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
             <div className="flex items-center gap-3">
-              {isPrivate ? (
-                <Lock className="w-5 h-5 text-purple-500" />
-              ) : (
-                <Unlock className="w-5 h-5 text-gray-400" />
-              )}
+              {isPrivate
+                ? <Lock className="w-5 h-5 text-purple-500" />
+                : <Unlock className="w-5 h-5 text-gray-400" />}
               <div>
-                <label htmlFor="private-toggle" className="text-sm font-medium text-gray-900 cursor-pointer">
+                <label
+                  htmlFor="private-toggle"
+                  className="text-sm font-medium text-gray-900 cursor-pointer"
+                >
                   Log Privately
                 </label>
                 <p className="text-xs text-gray-500">
-                  {isPrivate 
-                    ? "This entry will only be visible to you" 
-                    : "This entry will be visible in your groups"
-                  }
+                  {isPrivate
+                    ? "This entry will only be visible to you"
+                    : "This entry will be visible in your groups"}
                 </p>
               </div>
             </div>
@@ -358,12 +386,12 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
               id="private-toggle"
               onClick={() => setIsPrivate(!isPrivate)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 ${
-                isPrivate ? 'bg-purple-500' : 'bg-gray-300'
+                isPrivate ? "bg-purple-500" : "bg-gray-300"
               }`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  isPrivate ? 'translate-x-6' : 'translate-x-1'
+                  isPrivate ? "translate-x-6" : "translate-x-1"
                 }`}
               />
             </button>
@@ -382,13 +410,11 @@ export const WeightEntry: React.FC<WeightEntryProps> = ({ onEntryAdded, userHeig
               disabled={loading || !weight}
               className="flex-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Saving...' : 'Save Entry'}
+              {loading ? "Saving..." : "Save Entry"}
             </button>
           </div>
         </form>
       </div>
-
-
     </>
-  )
-}
+  );
+};

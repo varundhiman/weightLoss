@@ -10,11 +10,13 @@ BEGIN
       (SELECT weight 
        FROM weight_entries we2 
        WHERE we2.user_id = we1.user_id 
+         AND we2.is_private = false
        ORDER BY created_at ASC 
        LIMIT 1) AS first_weight,
       (SELECT weight 
        FROM weight_entries we2 
        WHERE we2.user_id = we1.user_id 
+         AND we2.is_private = false
        ORDER BY created_at DESC 
        LIMIT 1) AS last_weight
     FROM weight_entries we1
@@ -23,6 +25,7 @@ BEGIN
       FROM group_members gm 
       WHERE gm.group_id = get_group_weight_loss.group_id
     )
+      AND we1.is_private = false
     GROUP BY we1.user_id
   ), 
   WeightLossDetails AS (
