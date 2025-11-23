@@ -42,7 +42,7 @@ export const GroupsList: React.FC<GroupsListProps> = ({ onSelectGroup, selectedG
 
     try {
       setError(null)
-      
+
       // First get group IDs where user is a member
       const { data: memberships, error: membershipError } = await supabase
         .from('group_members')
@@ -137,7 +137,7 @@ export const GroupsList: React.FC<GroupsListProps> = ({ onSelectGroup, selectedG
     const now = new Date()
     const startDate = group.start_date ? new Date(group.start_date) : null
     const endDate = group.end_date ? new Date(group.end_date) : null
-    
+
     if (startDate && now < startDate) return false
     if (endDate && now > endDate) return false
     return true
@@ -272,11 +272,10 @@ export const GroupsList: React.FC<GroupsListProps> = ({ onSelectGroup, selectedG
             return (
               <div
                 key={group.id}
-                className={`w-full p-4 rounded-lg border-2 transition-all ${
-                  selectedGroupId === group.id
-                    ? 'border-purple-500 bg-purple-50'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                } ${!isActive ? 'opacity-60' : ''}`}
+                className={`w-full p-4 rounded-lg border-2 transition-all ${selectedGroupId === group.id
+                  ? 'border-purple-500 bg-purple-50'
+                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  } ${!isActive ? 'opacity-60' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <button
@@ -461,7 +460,7 @@ const EditGroupModal: React.FC<{
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    
+
     try {
       const { error } = await supabase
         .from('groups')
@@ -491,7 +490,7 @@ const EditGroupModal: React.FC<{
             <p className="text-sm text-gray-500">{group.name}</p>
           </div>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -507,7 +506,7 @@ const EditGroupModal: React.FC<{
               Leave empty for no end date
             </p>
           </div>
-          
+
           <div className="flex gap-3">
             <button
               type="button"
@@ -540,17 +539,49 @@ const CreateGroupModal: React.FC<{
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [customInviteCode, setCustomInviteCode] = useState('')
+  const [isTeamChallenge, setIsTeamChallenge] = useState(false)
+  const [teams, setTeams] = useState<{ name: string; color: string }[]>([
+    { name: 'Team 1', color: '#EF4444' },
+    { name: 'Team 2', color: '#3B82F6' }
+  ])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { user } = useAuth()
+
+  const teamColors = [
+    '#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6',
+    '#EC4899', '#14B8A6', '#F97316', '#06B6D4', '#84CC16'
+  ]
+
+  const addTeam = () => {
+    const nextColor = teamColors[teams.length % teamColors.length]
+    setTeams([...teams, { name: `Team ${teams.length + 1}`, color: nextColor }])
+  }
+
+  const removeTeam = (index: number) => {
+    if (teams.length > 2) {
+      setTeams(teams.filter((_, i) => i !== index))
+    }
+  }
+
+  const updateTeam = (index: number, field: 'name' | 'color', value: string) => {
+    const updated = [...teams]
+    updated[index][field] = value
+    setTeams(updated)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || !name) return
 
+    if (isTeamChallenge && teams.length < 2) {
+      setError('Team challenge requires at least 2 teams')
+      return
+    }
+
     setLoading(true)
     setError('')
-    
+
     try {
       // Generate invite code - use custom if provided, otherwise generate random
       let inviteCode = customInviteCode.toUpperCase()
@@ -586,20 +617,53 @@ const CreateGroupModal: React.FC<{
           created_by: user.id,
           invite_code: inviteCode,
           start_date: startDate || null,
-          end_date: endDate || null
+          end_date: endDate || null,
+          is_team_challenge: isTeamChallenge
         })
         .select()
         .single()
 
       if (error) throw error
 
-      // Add creator as member (no display_name needed anymore)
-      await supabase
-        .from('group_members')
-        .insert({
-          group_id: data.id,
-          user_id: user.id
-        })
+      // If team challenge, create teams
+      if (isTeamChallenge) {
+        const { error: teamsError } = await supabase
+          .from('teams')
+          .insert(
+            teams.map(team => ({
+              group_id: data.id,
+              name: team.name,
+              color: team.color
+            }))
+          )
+
+        if (teamsError) throw teamsError
+
+        // Get the created teams to assign creator to first team
+        const { data: createdTeams } = await supabase
+          .from('teams')
+          .select('id')
+          .eq('group_id', data.id)
+          .order('created_at', { ascending: true })
+          .limit(1)
+
+        // Add creator as member with first team assignment
+        await supabase
+          .from('group_members')
+          .insert({
+            group_id: data.id,
+            user_id: user.id,
+            team_id: createdTeams?.[0]?.id || null
+          })
+      } else {
+        // Add creator as member (no team)
+        await supabase
+          .from('group_members')
+          .insert({
+            group_id: data.id,
+            user_id: user.id
+          })
+      }
 
       onCreated()
     } catch (error: any) {
@@ -614,13 +678,13 @@ const CreateGroupModal: React.FC<{
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4">Create New Group</h3>
-        
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
             <p className="text-red-700 text-sm">{error}</p>
           </div>
         )}
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -635,7 +699,7 @@ const CreateGroupModal: React.FC<{
               required
             />
           </div>
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Description (Optional)
@@ -649,6 +713,67 @@ const CreateGroupModal: React.FC<{
             />
           </div>
 
+          {/* Team Challenge Toggle */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isTeamChallenge}
+                onChange={(e) => setIsTeamChallenge(e.target.checked)}
+                className="w-4 h-4 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
+              />
+              <div>
+                <span className="text-sm font-medium text-gray-900">Team Challenge</span>
+                <p className="text-xs text-gray-600">Members compete in teams instead of individually</p>
+              </div>
+            </label>
+          </div>
+
+          {/* Team Creation UI */}
+          {isTeamChallenge && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-700">
+                  Teams (min 2)
+                </label>
+                <button
+                  type="button"
+                  onClick={addTeam}
+                  className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+                >
+                  + Add Team
+                </button>
+              </div>
+              {teams.map((team, index) => (
+                <div key={index} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={team.name}
+                    onChange={(e) => updateTeam(index, 'name', e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                    placeholder={`Team ${index + 1}`}
+                    required={isTeamChallenge}
+                  />
+                  <input
+                    type="color"
+                    value={team.color}
+                    onChange={(e) => updateTeam(index, 'color', e.target.value)}
+                    className="w-12 h-10 border border-gray-300 rounded-lg cursor-pointer"
+                  />
+                  {teams.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => removeTeam(index)}
+                      className="px-3 text-red-600 hover:text-red-700"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -661,7 +786,7 @@ const CreateGroupModal: React.FC<{
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 End Date (Optional)
@@ -692,7 +817,7 @@ const CreateGroupModal: React.FC<{
               Max 6 characters. Leave empty to generate automatically.
             </p>
           </div>
-          
+
           <div className="flex gap-3">
             <button
               type="button"
@@ -715,6 +840,7 @@ const CreateGroupModal: React.FC<{
   )
 }
 
+
 // Join Group Modal Component
 const JoinGroupModal: React.FC<{
   onClose: () => void
@@ -722,29 +848,86 @@ const JoinGroupModal: React.FC<{
 }> = ({ onClose, onJoined }) => {
   const [inviteCode, setInviteCode] = useState('')
   const [loading, setLoading] = useState(false)
+  const [groupFound, setGroupFound] = useState<{ id: string; name: string; is_team_challenge: boolean } | null>(null)
+  const [teams, setTeams] = useState<{ id: string; name: string; color: string; member_count: number }[]>([])
+  const [selectedTeam, setSelectedTeam] = useState<string | null>(null)
+  const [error, setError] = useState('')
   const { user } = useAuth()
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user || !inviteCode) return
+  const handleFindGroup = async () => {
+    if (!inviteCode) return
 
     setLoading(true)
+    setError('')
     try {
       // Find group by invite code
       const { data: group, error: groupError } = await supabase
         .from('groups')
-        .select('id')
+        .select('id, name, is_team_challenge')
         .eq('invite_code', inviteCode.toUpperCase())
         .single()
 
-      if (groupError) throw new Error('Invalid invite code')
+      if (groupError) {
+        setError('Invalid invite code')
+        return
+      }
 
-      // Add user as member (no display_name needed anymore)
+      setGroupFound(group)
+
+      // If it's a team challenge, fetch teams
+      if (group.is_team_challenge) {
+        const { data: teamsData, error: teamsError } = await supabase
+          .from('teams')
+          .select('id, name, color')
+          .eq('group_id', group.id)
+          .order('created_at', { ascending: true })
+
+        if (teamsError) throw teamsError
+
+        // Get member counts for each team
+        const teamsWithCounts = await Promise.all(
+          (teamsData || []).map(async (team) => {
+            const { count } = await supabase
+              .from('group_members')
+              .select('*', { count: 'exact', head: true })
+              .eq('team_id', team.id)
+
+            return {
+              ...team,
+              member_count: count || 0
+            }
+          })
+        )
+
+        setTeams(teamsWithCounts)
+      }
+    } catch (error) {
+      console.error('Error finding group:', error)
+      setError('Error finding group')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!user || !groupFound) return
+
+    if (groupFound.is_team_challenge && !selectedTeam) {
+      setError('Please select a team')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      // Add user as member
       const { error } = await supabase
         .from('group_members')
         .insert({
-          group_id: group.id,
-          user_id: user.id
+          group_id: groupFound.id,
+          user_id: user.id,
+          team_id: groupFound.is_team_challenge ? selectedTeam : null
         })
 
       if (error) throw error
@@ -752,6 +935,7 @@ const JoinGroupModal: React.FC<{
       onJoined()
     } catch (error) {
       console.error('Error joining group:', error)
+      setError('Error joining group')
     } finally {
       setLoading(false)
     }
@@ -761,23 +945,91 @@ const JoinGroupModal: React.FC<{
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl p-6 w-full max-w-md">
         <h3 className="text-lg font-semibold mb-4">Join Group</h3>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-red-700 text-sm">{error}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Invite Code
             </label>
-            <input
-              type="text"
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
-              placeholder="ABC123"
-              required
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase"
+                placeholder="ABC123"
+                required
+                disabled={!!groupFound}
+              />
+              {!groupFound && (
+                <button
+                  type="button"
+                  onClick={handleFindGroup}
+                  disabled={loading || !inviteCode}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+                >
+                  Find
+                </button>
+              )}
+            </div>
             <p className="text-xs text-gray-500 mt-1">
               Enter the 6-character code shared by your group
             </p>
           </div>
+
+          {groupFound && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <p className="text-sm font-medium text-green-900">Group found: {groupFound.name}</p>
+              {groupFound.is_team_challenge && (
+                <p className="text-xs text-green-700 mt-1">This is a team challenge</p>
+              )}
+            </div>
+          )}
+
+          {groupFound && groupFound.is_team_challenge && teams.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Your Team *
+              </label>
+              <div className="space-y-2">
+                {teams.map((team) => (
+                  <label
+                    key={team.id}
+                    className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-all ${selectedTeam === team.id
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                  >
+                    <input
+                      type="radio"
+                      name="team"
+                      value={team.id}
+                      checked={selectedTeam === team.id}
+                      onChange={(e) => setSelectedTeam(e.target.value)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div
+                      className="w-4 h-4 rounded-full"
+                      style={{ backgroundColor: team.color }}
+                    />
+                    <div className="flex-1">
+                      <span className="font-medium text-gray-900">{team.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">
+                        ({team.member_count} {team.member_count === 1 ? 'member' : 'members'})
+                      </span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <button
               type="button"
@@ -788,7 +1040,7 @@ const JoinGroupModal: React.FC<{
             </button>
             <button
               type="submit"
-              disabled={loading || !inviteCode}
+              disabled={loading || !groupFound}
               className="flex-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
               {loading ? 'Joining...' : 'Join Group'}

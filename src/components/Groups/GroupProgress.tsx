@@ -8,6 +8,7 @@ import { calculateGroupWeightLoss, isGroupInactive, WeightLossDetail } from '../
 interface MemberProgress {
   user_id: string
   display_name: string
+  team_id: string | null
   entries: {
     id: string
     percentage_change: number
@@ -19,6 +20,17 @@ interface MemberProgress {
   days_active: number
 }
 
+interface TeamProgress {
+  team_id: string
+  team_name: string
+  team_color: string
+  member_count: number
+  average_change: number
+  total_entries: number
+  best_change: number
+  members: MemberProgress[]
+}
+
 interface GroupProgressProps {
   groupId: string
   groupName: string
@@ -26,12 +38,16 @@ interface GroupProgressProps {
 
 export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName }) => {
   const [membersProgress, setMembersProgress] = useState<MemberProgress[]>([])
+  const [teamsProgress, setTeamsProgress] = useState<TeamProgress[]>([])
+  const [isTeamChallenge, setIsTeamChallenge] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectedMember, setSelectedMember] = useState<string | null>(null)
+  const [selectedTeam, setSelectedTeam] = useState<string | null>(null)
   const [groupStartDate, setGroupStartDate] = useState<string | null>(null)
   const [groupEndDate, setGroupEndDate] = useState<string | null>(null)
   const [totalWeightLost, setTotalWeightLost] = useState<number | null>(null)
   const [weightLossDetails, setWeightLossDetails] = useState<WeightLossDetail[]>([])
+  const [userTeamId, setUserTeamId] = useState<string | null>(null)
   const { user } = useAuth()
 
   useEffect(() => {
@@ -42,10 +58,10 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
   const fetchGroupProgress = async () => {
     try {
-      // First, get the group's data including end_date and total_weight_lost
+      // First, get the group's data including is_team_challenge
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
-        .select('start_date, end_date, total_weight_lost')
+        .select('start_date, end_date, total_weight_lost, is_team_challenge')
         .eq('id', groupId)
         .single()
 
@@ -53,6 +69,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
       setGroupStartDate(groupData?.start_date || null)
       setGroupEndDate(groupData?.end_date || null)
       setTotalWeightLost(groupData?.total_weight_lost || null)
+      setIsTeamChallenge(groupData?.is_team_challenge || false)
 
       // Check if group is inactive and calculate weight loss if needed
       const inactive = isGroupInactive(groupData?.end_date)
@@ -60,7 +77,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
         try {
           const weightLossResult = await calculateGroupWeightLoss(groupId)
           setWeightLossDetails(weightLossResult.members)
-          
+
           // Update the database if total_weight_lost is not set
           if (groupData?.total_weight_lost === null && weightLossResult.total_weight_lost > 0) {
             await supabase
@@ -74,11 +91,24 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
         }
       }
 
-      // Get all group members with their profile information
+      // Get user's team ID if this is a team challenge
+      if (groupData?.is_team_challenge && user) {
+        const { data: userMembership } = await supabase
+          .from('group_members')
+          .select('team_id')
+          .eq('group_id', groupId)
+          .eq('user_id', user.id)
+          .single()
+
+        setUserTeamId(userMembership?.team_id || null)
+      }
+
+      // Get all group members with their profile information and team
       const { data: members, error: membersError } = await supabase
         .from('group_members')
         .select(`
           user_id,
+          team_id,
           profiles!inner (
             display_name
           )
@@ -89,12 +119,13 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
       if (!members || members.length === 0) {
         setMembersProgress([])
+        setTeamsProgress([])
         return
       }
 
       // Get weight entries for all members
       const memberIds = members.map(m => m.user_id)
-      
+
       // Build the query - filter by start date if it exists and exclude private entries
       let query = supabase
         .from('weight_entries')
@@ -115,12 +146,12 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
       // Group entries by user and calculate stats
       const progressData: MemberProgress[] = members.map(member => {
         const userEntries = entries?.filter(e => e.user_id === member.user_id) || []
-        
-        const latest_change = userEntries.length > 0 
-          ? userEntries[userEntries.length - 1].percentage_change 
+
+        const latest_change = userEntries.length > 0
+          ? userEntries[userEntries.length - 1].percentage_change
           : 0
-        
-        const best_change = userEntries.length > 0 
+
+        const best_change = userEntries.length > 0
           ? Math.min(...userEntries.map(e => e.percentage_change))
           : 0
 
@@ -137,6 +168,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
         return {
           user_id: member.user_id,
           display_name: (member.profiles as any)?.display_name || 'User',
+          team_id: member.team_id,
           entries: userEntries,
           latest_change,
           total_entries: userEntries.length,
@@ -147,8 +179,55 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
 
       // Sort by latest progress (best performers first)
       progressData.sort((a, b) => a.latest_change - b.latest_change)
-      
+
       setMembersProgress(progressData)
+
+      // If team challenge, calculate team stats
+      if (groupData?.is_team_challenge) {
+        const { data: teams, error: teamsError } = await supabase
+          .from('teams')
+          .select('id, name, color')
+          .eq('group_id', groupId)
+          .order('created_at', { ascending: true })
+
+        if (teamsError) throw teamsError
+
+        const teamsData: TeamProgress[] = (teams || []).map(team => {
+          const teamMembers = progressData.filter(m => m.team_id === team.id)
+
+          if (teamMembers.length === 0) {
+            return {
+              team_id: team.id,
+              team_name: team.name,
+              team_color: team.color,
+              member_count: 0,
+              average_change: 0,
+              total_entries: 0,
+              best_change: 0,
+              members: []
+            }
+          }
+
+          const average_change = teamMembers.reduce((sum, m) => sum + m.latest_change, 0) / teamMembers.length
+          const total_entries = teamMembers.reduce((sum, m) => sum + m.total_entries, 0)
+          const best_change = Math.min(...teamMembers.map(m => m.best_change))
+
+          return {
+            team_id: team.id,
+            team_name: team.name,
+            team_color: team.color,
+            member_count: teamMembers.length,
+            average_change,
+            total_entries,
+            best_change,
+            members: teamMembers
+          }
+        })
+
+        // Sort teams by average change (best performing first)
+        teamsData.sort((a, b) => a.average_change - b.average_change)
+        setTeamsProgress(teamsData)
+      }
     } catch (error) {
       console.error('Error fetching group progress:', error)
     } finally {
@@ -162,7 +241,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
         <div className="text-center py-8 text-gray-500">
           <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
           <p className="text-sm">
-            {groupStartDate 
+            {groupStartDate
               ? `No progress data since ${format(new Date(groupStartDate), 'MMM d, yyyy')}`
               : 'No progress data yet'
             }
@@ -198,11 +277,11 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
         <svg width="100%" height="150" viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="overflow-visible">
           <defs>
             <linearGradient id={`gradient-${member.user_id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor={isPositive ? "#FEE2E2" : "#DCFCE7"} stopOpacity="0.6"/>
-              <stop offset="100%" stopColor={isPositive ? "#FEE2E2" : "#DCFCE7"} stopOpacity="0.1"/>
+              <stop offset="0%" stopColor={isPositive ? "#FEE2E2" : "#DCFCE7"} stopOpacity="0.6" />
+              <stop offset="100%" stopColor={isPositive ? "#FEE2E2" : "#DCFCE7"} stopOpacity="0.1" />
             </linearGradient>
           </defs>
-          
+
           {/* Zero line */}
           <line
             x1={padding}
@@ -213,7 +292,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
             strokeWidth="1"
             strokeDasharray="3,3"
           />
-          
+
           {/* Main line */}
           {points.length > 1 && (
             <path
@@ -225,7 +304,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
               strokeLinejoin="round"
             />
           )}
-          
+
           {/* Data points */}
           {points.map((point, index) => (
             <circle
@@ -258,7 +337,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
     )
   }
 
-  const selectedMemberData = selectedMember 
+  const selectedMemberData = selectedMember
     ? membersProgress.find(m => m.user_id === selectedMember)
     : null
 
@@ -329,7 +408,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
               </div>
             </div>
           </div>
-          
+
           {weightLossDetails.length > 0 && (
             <div className="mt-6">
               <h5 className="font-semibold text-gray-900 mb-3">Weight Loss Champions</h5>
@@ -338,9 +417,8 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                   <div key={member.email} className="bg-white rounded-lg p-3 border border-purple-100">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                          index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-purple-400'
-                        }`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-orange-400' : 'bg-purple-400'
+                          }`}>
                           {index + 1}
                         </div>
                         <span className="font-medium text-gray-900 text-sm">{member.display_name}</span>
@@ -408,7 +486,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                 <div className="text-xs text-blue-700 mt-1">Since group start</div>
               )}
             </div>
-            
+
             <div className="bg-green-50 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
                 <TrendingDown className="w-4 h-4 text-green-600" />
@@ -421,7 +499,7 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
                 <div className="text-xs text-green-700 mt-1">Since group start</div>
               )}
             </div>
-            
+
             <div className="bg-purple-50 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
                 <Users className="w-4 h-4 text-purple-600" />
@@ -455,12 +533,12 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
       ) : (
         // Overview grid
         <div className="space-y-6">
-          {membersProgress.length === 0 ? (
+          {(isTeamChallenge ? teamsProgress.length === 0 : membersProgress.length === 0) ? (
             <div className="text-center py-12">
               <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h4 className="text-lg font-medium text-gray-900 mb-2">No Progress Data</h4>
               <p className="text-gray-500">
-                {groupStartDate 
+                {groupStartDate
                   ? `Group members haven't tracked progress since ${format(new Date(groupStartDate), 'MMM d, yyyy')}`
                   : 'Group members haven\'t started tracking their progress yet'
                 }
@@ -468,105 +546,228 @@ export const GroupProgress: React.FC<GroupProgressProps> = ({ groupId, groupName
             </div>
           ) : (
             <>
-              {/* Leaderboard */}
-              <div>
-                <h4 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-yellow-500" />
-                  Progress Leaderboard
-                  {groupStartDate && (
-                    <span className="text-sm font-normal text-gray-500">
-                      (Since {format(new Date(groupStartDate), 'MMM d, yyyy')})
-                    </span>
-                  )}
-                </h4>
-                <div className="space-y-2">
-                  {membersProgress.slice(0, 3).map((member, index) => (
-                    <div
-                      key={member.user_id}
-                      className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                      onClick={() => setSelectedMember(member.user_id)}
-                    >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${
-                        index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : 'bg-orange-400'
-                      }`}>
-                        {index + 1}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900">
-                          {member.display_name}
-                          {member.user_id === user?.id && (
-                            <span className="text-xs text-blue-600 ml-2">(You)</span>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {member.total_entries} entries • {member.days_active} days
-                          {groupStartDate && ' since start'}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className={`font-bold ${member.latest_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                          {member.latest_change >= 0 ? '+' : ''}{member.latest_change.toFixed(1)}%
-                        </div>
-                        <div className="text-xs text-gray-500">current</div>
-                      </div>
-                      <div className="flex items-center">
-                        {member.latest_change < 0 ? (
-                          <TrendingDown className="w-4 h-4 text-green-500" />
-                        ) : (
-                          <TrendingUp className="w-4 h-4 text-red-500" />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* All Members Grid */}
-              <div>
-                <h4 className="font-medium text-gray-900 mb-4">All Members</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {membersProgress.map((member) => (
-                    <div
-                      key={member.user_id}
-                      className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors cursor-pointer"
-                      onClick={() => setSelectedMember(member.user_id)}
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
-                            <span className="text-white text-sm font-semibold">
-                              {member.display_name.charAt(0).toUpperCase()}
-                            </span>
+              {isTeamChallenge ? (
+                // TEAM CHALLENGE LEADERBOARD
+                <>
+                  {/* Team Leaderboard */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
+                      <Trophy className="w-4 h-4 text-yellow-500" />
+                      Team Leaderboard
+                      {groupStartDate && (
+                        <span className="text-sm font-normal text-gray-500">
+                          (Since {format(new Date(groupStartDate), 'MMM d, yyyy')})
+                        </span>
+                      )}
+                    </h4>
+                    <div className="space-y-2">
+                      {teamsProgress.slice(0, 3).map((team, index) => (
+                        <div
+                          key={team.team_id}
+                          className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                          onClick={() => setSelectedTeam(team.team_id)}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : 'bg-orange-400'
+                            }`}>
+                            {index + 1}
                           </div>
-                          <div>
-                            <div className="font-medium text-gray-900 text-sm">
-                              {member.display_name}
-                              {member.user_id === user?.id && (
-                                <span className="text-xs text-blue-600 ml-1">(You)</span>
-                              )}
+                          <div
+                            className="w-4 h-4 rounded-full"
+                            style={{ backgroundColor: team.team_color }}
+                          />
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{team.team_name}</div>
+                            <div className="text-sm text-gray-500">
+                              {team.member_count} {team.member_count === 1 ? 'member' : 'members'} • {team.total_entries} total entries
                             </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className={`text-lg font-bold ${member.latest_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                            {member.latest_change >= 0 ? '+' : ''}{member.latest_change.toFixed(1)}%
+                          <div className="text-right">
+                            <div className={`font-bold ${team.average_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                              {team.average_change >= 0 ? '+' : ''}{team.average_change.toFixed(1)}%
+                            </div>
+                            <div className="text-xs text-gray-500">avg</div>
+                          </div>
+                          <div className="flex items-center">
+                            {team.average_change < 0 ? (
+                              <TrendingDown className="w-4 h-4 text-green-500" />
+                            ) : (
+                              <TrendingUp className="w-4 h-4 text-red-500" />
+                            )}
                           </div>
                         </div>
-                      </div>
-                      
-                      <MemberChart member={member} />
-                      
-                      <div className="flex justify-between text-xs text-gray-500 mt-2">
-                        <span>{member.total_entries} entries</span>
-                        <span>
-                          {member.days_active} days
-                          {groupStartDate && ' since start'}
-                        </span>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+
+                  {/* All Teams Grid */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-4">All Teams</h4>
+                    <div className="space-y-4">
+                      {teamsProgress.map((team) => {
+                        const canViewMembers = team.members.some(m => m.user_id === user?.id) || userTeamId === team.team_id
+                        return (
+                          <div
+                            key={team.team_id}
+                            className="bg-gray-50 rounded-lg p-4 border-2"
+                            style={{ borderColor: team.team_color + '40' }}
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-6 h-6 rounded-full" style={{ backgroundColor: team.team_color }} />
+                                <div>
+                                  <h5 className="font-semibold text-gray-900">{team.team_name}</h5>
+                                  <p className="text-sm text-gray-500">
+                                    {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className={`text-xl font-bold ${team.average_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                  {team.average_change >= 0 ? '+' : ''}{team.average_change.toFixed(1)}%
+                                </div>
+                                <div className="text-xs text-gray-500">Average Progress</div>
+                              </div>
+                            </div>
+
+                            {canViewMembers && team.members.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <h6 className="text-sm font-medium text-gray-700 mb-2">Team Members</h6>
+                                <div className="space-y-2">
+                                  {team.members.map((member) => (
+                                    <div
+                                      key={member.user_id}
+                                      className="flex items-center justify-between text-sm p-2 bg-white rounded cursor-pointer hover:bg-gray-50"
+                                      onClick={() => setSelectedMember(member.user_id)}
+                                    >
+                                      <span className="font-medium text-gray-900">
+                                        {member.display_name}
+                                        {member.user_id === user?.id && (
+                                          <span className="text-xs text-blue-600 ml-2">(You)</span>
+                                        )}
+                                      </span>
+                                      <span className={`font-bold ${member.latest_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                        {member.latest_change >= 0 ? '+' : ''}{member.latest_change.toFixed(1)}%
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {!canViewMembers && (
+                              <div className="mt-3 pt-3 border-t border-gray-200 text-center text-sm text-gray-500">
+                                🔒 Join this team to see individual member stats
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // INDIVIDUAL CHALLENGE LEADERBOARD (original)
+                <>
+                  {/* Leaderboard */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
+                      <Trophy className="w-4 h-4 text-yellow-500" />
+                      Progress Leaderboard
+                      {groupStartDate && (
+                        <span className="text-sm font-normal text-gray-500">
+                          (Since {format(new Date(groupStartDate), 'MMM d, yyyy')})
+                        </span>
+                      )}
+                    </h4>
+                    <div className="space-y-2">
+                      {membersProgress.slice(0, 3).map((member, index) => (
+                        <div
+                          key={member.user_id}
+                          className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                          onClick={() => setSelectedMember(member.user_id)}
+                        >
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : 'bg-orange-400'
+                            }`}>
+                            {index + 1}
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">
+                              {member.display_name}
+                              {member.user_id === user?.id && (
+                                <span className="text-xs text-blue-600 ml-2">(You)</span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {member.total_entries} entries • {member.days_active} days
+                              {groupStartDate && ' since start'}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`font-bold ${member.latest_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                              {member.latest_change >= 0 ? '+' : ''}{member.latest_change.toFixed(1)}%
+                            </div>
+                            <div className="text-xs text-gray-500">current</div>
+                          </div>
+                          <div className="flex items-center">
+                            {member.latest_change < 0 ? (
+                              <TrendingDown className="w-4 h-4 text-green-500" />
+                            ) : (
+                              <TrendingUp className="w-4 h-4 text-red-500" />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* All Members Grid */}
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-4">All Members</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {membersProgress.map((member) => (
+                        <div
+                          key={member.user_id}
+                          className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors cursor-pointer"
+                          onClick={() => setSelectedMember(member.user_id)}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
+                                <span className="text-white text-sm font-semibold">
+                                  {member.display_name.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900 text-sm">
+                                  {member.display_name}
+                                  {member.user_id === user?.id && (
+                                    <span className="text-xs text-blue-600 ml-1">(You)</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`text-lg font-bold ${member.latest_change >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                                {member.latest_change >= 0 ? '+' : ''}{member.latest_change.toFixed(1)}%
+                              </div>
+                            </div>
+                          </div>
+
+                          <MemberChart member={member} />
+
+                          <div className="flex justify-between text-xs text-gray-500 mt-2">
+                            <span>{member.total_entries} entries</span>
+                            <span>
+                              {member.days_active} days
+                              {groupStartDate && ' since start'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

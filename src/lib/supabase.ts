@@ -66,6 +66,7 @@ export type Database = {
           start_date: string | null
           end_date: string | null
           total_weight_lost: number | null
+          is_team_challenge: boolean
           created_at: string
         }
         Insert: {
@@ -76,6 +77,7 @@ export type Database = {
           start_date?: string | null
           end_date?: string | null
           total_weight_lost?: number | null
+          is_team_challenge?: boolean
         }
         Update: {
           name?: string
@@ -83,6 +85,7 @@ export type Database = {
           start_date?: string | null
           end_date?: string | null
           total_weight_lost?: number | null
+          is_team_challenge?: boolean
         }
       }
       group_members: {
@@ -91,15 +94,36 @@ export type Database = {
           group_id: string
           user_id: string
           display_name: string
+          team_id: string | null
           joined_at: string
         }
         Insert: {
           group_id: string
           user_id: string
           display_name: string
+          team_id?: string | null
         }
         Update: {
           display_name?: string
+          team_id?: string | null
+        }
+      }
+      teams: {
+        Row: {
+          id: string
+          group_id: string
+          name: string
+          color: string
+          created_at: string
+        }
+        Insert: {
+          group_id: string
+          name: string
+          color: string
+        }
+        Update: {
+          name?: string
+          color?: string
         }
       }
       messages: {
